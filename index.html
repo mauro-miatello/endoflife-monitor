@@ -1,0 +1,567 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EOL Monitor - Version Tracker</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        [v-cloak] { display: none; }
+        .modal-enter-active, .modal-leave-active { transition: opacity 0.3s ease; }
+        .modal-enter-from, .modal-leave-to { opacity: 0; }
+        ::-webkit-scrollbar { width: 8px; height: 8px; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        ::-webkit-scrollbar-track { background: #f1f5f9; }
+    </style>
+</head>
+<body class="bg-gray-100 text-slate-800 font-sans">
+
+<div id="app" v-cloak class="min-h-screen flex flex-col relative">
+
+    <header class="bg-slate-900 text-white p-4 shadow-lg sticky top-0 z-40">
+        <div class="container mx-auto flex flex-col md:flex-row justify-between items-center gap-4">
+            <div class="flex items-center gap-2">
+                <i class="fa-solid fa-server text-blue-400 text-xl"></i>
+                <div>
+                    <h1 class="text-xl font-bold leading-tight">{{ t('title') }}</h1>
+                    <p class="text-slate-400 text-xs">{{ t('subtitle') }}</p>
+                </div>
+            </div>
+            
+            <div class="flex items-center gap-3">
+                <div class="bg-slate-800 rounded p-1 flex">
+                    <button 
+                        @click="setViewMode('grid')" 
+                        :class="viewMode === 'grid' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'"
+                        class="px-3 py-1.5 rounded text-sm transition" :title="t('gridTitle')">
+                        <i class="fa-solid fa-border-all"></i>
+                    </button>
+                    <button 
+                        @click="setViewMode('list')" 
+                        :class="viewMode === 'list' ? 'bg-blue-600 text-white' : 'text-slate-400 hover:text-white'"
+                        class="px-3 py-1.5 rounded text-sm transition" :title="t('listTitle')">
+                        <i class="fa-solid fa-list"></i>
+                    </button>
+                </div>
+
+                <button @click="copyUrl" class="bg-slate-700 hover:bg-slate-600 border border-slate-600 text-white text-sm px-4 py-2 rounded shadow transition flex items-center gap-2 min-w-[140px] justify-center">
+                    <i v-if="!urlCopied" class="fa-solid fa-share-nodes"></i> 
+                    <i v-else class="fa-solid fa-check"></i>
+                    <span class="hidden sm:inline">{{ urlCopied ? t('copied') : t('copyUrl') }}</span>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <main class="container mx-auto p-4 flex-grow max-w-6xl">
+        
+        <div class="mb-6 mt-4 relative max-w-xl mx-auto z-30">
+            <div class="relative group">
+                <input 
+                    type="text" 
+                    v-model="searchQuery" 
+                    @input="filterProducts"
+                    :placeholder="t('searchPlaceholder')"
+                    class="w-full p-3 pl-10 rounded-lg border border-gray-300 shadow-sm focus:ring-2 focus:ring-blue-500 focus:outline-none transition"
+                >
+                <i class="fa-solid fa-search absolute left-3 top-4 text-gray-400"></i>
+                
+                <div v-if="filteredProducts.length > 0" class="absolute w-full bg-white mt-1 rounded-lg shadow-xl max-h-60 overflow-y-auto border border-gray-100 divide-y divide-gray-100">
+                    <div 
+                        v-for="prod in filteredProducts" 
+                        :key="prod"
+                        @click="openVersionSelector(prod)"
+                        class="p-3 hover:bg-blue-50 cursor-pointer flex justify-between items-center transition"
+                    >
+                        <span class="font-medium text-slate-700">{{ prod }}</span>
+                        <span class="text-xs text-slate-400">{{ t('selectVersions') }} <i class="fa-solid fa-chevron-right ml-1"></i></span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div v-if="trackedItems.length === 0 && !isLoading" class="text-center py-20 opacity-50">
+            <i class="fa-solid fa-layer-group text-6xl mb-4 text-gray-300"></i>
+            <p class="text-xl text-gray-500">{{ t('emptyTitle') }}</p>
+            <p class="text-sm">{{ t('emptySubtitle') }}</p>
+        </div>
+
+        <div v-else>
+            
+            <div v-if="viewMode === 'grid'" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div 
+                    v-for="(item, index) in trackedItems" 
+                    :key="item.id" 
+                    class="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden hover:shadow-md transition relative group"
+                >
+                    <div class="p-4">
+                        <div class="flex justify-between items-start mb-2">
+                            <div>
+                                <h3 class="font-bold text-lg capitalize text-slate-800 leading-none">{{ item.product }}</h3>
+                                <span class="inline-block mt-1 bg-gray-100 text-gray-600 text-xs px-2 py-0.5 rounded border border-gray-300">
+                                    v. {{ item.cycle }}
+                                </span>
+                            </div>
+                            <button @click="removeItem(index)" class="text-gray-300 hover:text-red-500 transition">
+                                <i class="fa-solid fa-times"></i>
+                            </button>
+                        </div>
+
+                        <div class="mt-4 flex items-center justify-between">
+                            <div>
+                                <p class="text-xs text-gray-500 uppercase font-semibold">{{ t('eolDateLabel') }}</p>
+                                <p class="font-mono text-lg" :class="getDateColor(item.eol)">
+                                    {{ formatDate(item.eol) }}
+                                </p>
+                            </div>
+                            <div class="text-right">
+                                <span :class="getStatusBadge(item.eol)" class="px-2 py-1 rounded text-xs font-bold uppercase tracking-wide">
+                                    {{ getStatusText(item.eol) }}
+                                </span>
+                            </div>
+                        </div>
+                        
+                        <div class="mt-3 pt-3 border-t border-gray-100 text-xs flex justify-between text-gray-400">
+                            <span>{{ t('latestLabel') }}: {{ item.latest }}</span>
+                            <span v-if="item.lts" class="text-purple-600 font-bold">LTS</span>
+                        </div>
+                    </div>
+                    <div class="h-1 w-full bg-gray-100">
+                        <div class="h-full" :class="getBarColor(item.eol)" :style="{width: '100%'}"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div v-if="viewMode === 'list'" class="bg-white rounded-lg shadow border border-gray-200 overflow-hidden">
+                <div class="overflow-x-auto">
+                    <table class="w-full text-sm text-left">
+                        <thead class="text-xs text-gray-500 uppercase bg-gray-50 border-b">
+                            <tr>
+                                <th class="px-4 py-3">{{ t('tableSoftware') }}</th>
+                                <th class="px-4 py-3">{{ t('tableVersion') }}</th>
+                                <th class="px-4 py-3">{{ t('tableEol') }}</th>
+                                <th class="px-4 py-3">{{ t('tableStatus') }}</th>
+                                <th class="px-4 py-3 hidden sm:table-cell">{{ t('latestLabel') }}</th>
+                                <th class="px-4 py-3 text-right">{{ t('tableActions') }}</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-gray-100">
+                            <tr v-for="(item, index) in trackedItems" :key="item.id" class="hover:bg-gray-50 transition">
+                                <td class="px-4 py-3 font-bold capitalize text-slate-700">
+                                    {{ item.product }}
+                                </td>
+                                <td class="px-4 py-3">
+                                    <span class="bg-gray-100 text-gray-700 px-2 py-1 rounded font-mono text-xs border border-gray-300">
+                                        {{ item.cycle }}
+                                    </span>
+                                    <span v-if="item.lts" class="ml-2 text-[10px] bg-purple-100 text-purple-700 px-1 rounded border border-purple-200">LTS</span>
+                                </td>
+                                <td class="px-4 py-3 font-mono font-medium" :class="getDateColor(item.eol)">
+                                    {{ formatDate(item.eol) }}
+                                </td>
+                                <td class="px-4 py-3">
+                                    <span :class="getStatusBadge(item.eol)" class="px-2 py-1 rounded text-[10px] font-bold uppercase tracking-wide whitespace-nowrap">
+                                        {{ getStatusText(item.eol) }}
+                                    </span>
+                                </td>
+                                <td class="px-4 py-3 text-gray-500 hidden sm:table-cell">
+                                    {{ item.latest }}
+                                </td>
+                                <td class="px-4 py-3 text-right">
+                                    <button @click="removeItem(index)" class="text-gray-400 hover:text-red-600 transition p-1" :title="t('removeBtn')">
+                                        <i class="fa-solid fa-trash-can"></i>
+                                    </button>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+        </div>
+    </main>
+
+    <footer class="bg-white border-t p-4 text-center text-sm text-gray-500 mt-auto">
+        <p>{{ t('footerText') }}</p>
+        <p v-if="visitCount > 0" class="mt-2 text-xs text-gray-400">
+            <i class="fa-solid fa-eye mr-1"></i> {{ t('viewsLabel') }}: 
+            <span class="font-mono font-bold">{{ visitCount }}</span>
+        </p>
+    </footer>
+
+    <transition name="modal">
+        <div v-if="showModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 backdrop-blur-sm p-4">
+            <div class="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[80vh] flex flex-col overflow-hidden">
+                <div class="p-4 bg-slate-50 border-b flex justify-between items-center">
+                    <h2 class="text-xl font-bold capitalize">{{ t('modalTitle').replace('{product}', currentModalProduct) }}</h2>
+                    <button @click="closeModal" class="text-gray-500 hover:text-gray-800">
+                        <i class="fa-solid fa-times text-xl"></i>
+                    </button>
+                </div>
+                <div class="overflow-y-auto p-4 flex-grow">
+                    <div v-if="modalLoading" class="text-center py-10">
+                        <i class="fa-solid fa-circle-notch fa-spin text-3xl text-blue-500"></i>
+                    </div>
+                    <table v-else class="w-full text-sm text-left">
+                        <thead class="text-xs text-gray-500 uppercase bg-gray-50 sticky top-0">
+                            <tr>
+                                <th class="px-4 py-3">{{ t('modalSelect') }}</th>
+                                <th class="px-4 py-3">{{ t('tableVersion') }}</th>
+                                <th class="px-4 py-3">{{ t('tableEol') }}</th>
+                                <th class="px-4 py-3 text-right">{{ t('tableStatus') }}</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr v-for="cycle in currentProductData" :key="cycle.cycle" 
+                                class="border-b hover:bg-blue-50 cursor-pointer transition"
+                                @click="toggleSelection(cycle)"
+                            >
+                                <td class="px-4 py-3">
+                                    <div class="w-5 h-5 border-2 rounded flex items-center justify-center transition"
+                                         :class="isCycleSelected(cycle.cycle) ? 'bg-blue-600 border-blue-600' : 'border-gray-300'">
+                                        <i v-if="isCycleSelected(cycle.cycle)" class="fa-solid fa-check text-white text-xs"></i>
+                                    </div>
+                                </td>
+                                <td class="px-4 py-3 font-bold text-slate-700">
+                                    {{ cycle.cycle }}
+                                    <span v-if="cycle.lts" class="ml-2 text-[10px] bg-purple-100 text-purple-700 px-1 rounded border border-purple-200">LTS</span>
+                                </td>
+                                <td class="px-4 py-3 font-mono">{{ formatDate(cycle.eol) }}</td>
+                                <td class="px-4 py-3 text-right">
+                                    <span :class="getStatusTextClass(cycle.eol)" class="font-medium">
+                                        {{ getStatusText(cycle.eol) }}
+                                    </span>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="p-4 border-t bg-gray-50 flex justify-end gap-3">
+                    <button @click="closeModal" class="px-4 py-2 text-gray-600 hover:bg-gray-200 rounded transition">{{ t('closeBtn') }}</button>
+                    <button @click="confirmSelection" class="px-6 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded shadow transition">
+                        {{ t('confirmBtn') }}
+                    </button>
+                </div>
+            </div>
+        </div>
+    </transition>
+
+</div>
+
+<script>
+    const { createApp } = Vue;
+
+    createApp({
+        data() {
+            return {
+                lang: 'en', // default, verrà sovrascritto in mounted
+                translations: {
+                    en: {
+                        title: "EOL Version Tracker",
+                        subtitle: "Granular monitoring per version",
+                        gridTitle: "Grid View",
+                        listTitle: "List View",
+                        copyUrl: "Copy URL",
+                        copied: "Copied!",
+                        searchPlaceholder: "Search software (e.g. kubernetes, php...)",
+                        selectVersions: "Select versions",
+                        emptyTitle: "Your dashboard is empty.",
+                        emptySubtitle: "Search for software above to select versions to track.",
+                        eolDateLabel: "EOL Date",
+                        latestLabel: "Latest",
+                        tableSoftware: "Software",
+                        tableVersion: "Version",
+                        tableEol: "EOL Date",
+                        tableStatus: "Status",
+                        tableActions: "Actions",
+                        removeBtn: "Remove",
+                        modalTitle: "Versions of {product}",
+                        modalSelect: "Select",
+                        closeBtn: "Close",
+                        confirmBtn: "Confirm & Add",
+                        footerText: "Data provided by endoflife.date. The URL contains your configuration.",
+                        viewsLabel: "Page views",
+                        statusActive: "Active",
+                        statusExpired: "Expired",
+                        statusLessMonth: "< 1 month",
+                        statusMonths: "months",
+                        dateNever: "Never",
+                        dateUnknown: "N/A"
+                    },
+                    it: {
+                        title: "Monitor Scadenze EOL",
+                        subtitle: "Monitoraggio granulare per versione",
+                        gridTitle: "Vista Griglia",
+                        listTitle: "Vista Elenco",
+                        copyUrl: "Copia URL",
+                        copied: "Copiato!",
+                        searchPlaceholder: "Cerca software (es. kubernetes, php...)",
+                        selectVersions: "Seleziona versioni",
+                        emptyTitle: "La tua dashboard è vuota.",
+                        emptySubtitle: "Cerca un software sopra per selezionare le versioni da tracciare.",
+                        eolDateLabel: "Data EOL",
+                        latestLabel: "Ultima",
+                        tableSoftware: "Software",
+                        tableVersion: "Versione",
+                        tableEol: "Data EOL",
+                        tableStatus: "Stato",
+                        tableActions: "Azioni",
+                        removeBtn: "Rimuovi",
+                        modalTitle: "Versioni di {product}",
+                        modalSelect: "Seleziona",
+                        closeBtn: "Chiudi",
+                        confirmBtn: "Conferma e Aggiungi",
+                        footerText: "Dati forniti da endoflife.date. La configurazione è salvata nell'URL.",
+                        viewsLabel: "Visualizzazioni",
+                        statusActive: "Attivo",
+                        statusExpired: "Scaduto",
+                        statusLessMonth: "< 1 mese",
+                        statusMonths: "mesi",
+                        dateNever: "Mai",
+                        dateUnknown: "N/D"
+                    }
+                },
+
+                viewMode: 'grid',
+                allProductsList: [],
+                searchQuery: '',
+                filteredProducts: [],
+                
+                showModal: false,
+                modalLoading: false,
+                currentModalProduct: '',
+                currentProductData: [],
+                tempSelectedCycles: [],
+
+                trackedItems: [], 
+                isLoading: false,
+                urlCopied: false,
+                visitCount: 0
+            }
+        },
+        async mounted() {
+            // 1. Rilevamento Lingua
+            const userLang = navigator.language || navigator.userLanguage; 
+            if (userLang && userLang.startsWith('it')) {
+                this.lang = 'it';
+            } else {
+                this.lang = 'en';
+            }
+
+            // 2. Ripristino Vista
+            const savedView = localStorage.getItem('eolViewMode');
+            if (savedView) this.viewMode = savedView;
+
+            // 3. Fetch Lista Prodotti
+            try {
+                const res = await fetch('https://endoflife.date/api/all.json');
+                this.allProductsList = await res.json();
+            } catch (e) { console.error("Err fetch list", e); }
+
+            // 4. Ripristino URL
+            await this.restoreFromUrl();
+
+            // 5. Contatore Visite (Opzionale)
+            try {
+                // Sostituisci 'eol-monitor-app' con un ID unico se vuoi statistiche personali
+                const res = await fetch('https://api.countapi.xyz/hit/eol-monitor-app/visits');
+                const data = await res.json();
+                this.visitCount = data.value;
+            } catch (e) { /* ignore error */ }
+        },
+        methods: {
+            t(key) {
+                return this.translations[this.lang][key] || key;
+            },
+
+            setViewMode(mode) {
+                this.viewMode = mode;
+                localStorage.setItem('eolViewMode', mode);
+            },
+            
+            filterProducts() {
+                if (this.searchQuery.length < 2) {
+                    this.filteredProducts = [];
+                    return;
+                }
+                const q = this.searchQuery.toLowerCase();
+                this.filteredProducts = this.allProductsList
+                    .filter(p => p.toLowerCase().includes(q))
+                    .slice(0, 8);
+            },
+
+            async openVersionSelector(product) {
+                this.currentModalProduct = product;
+                this.showModal = true;
+                this.modalLoading = true;
+                this.tempSelectedCycles = [];
+                this.filteredProducts = [];
+                this.searchQuery = '';
+
+                try {
+                    const res = await fetch(`https://endoflife.date/api/${product}.json`);
+                    this.currentProductData = await res.json();
+                } catch (e) {
+                    alert("API Error");
+                } finally {
+                    this.modalLoading = false;
+                }
+            },
+
+            isCycleSelected(cycleStr) {
+                return this.tempSelectedCycles.includes(cycleStr);
+            },
+
+            toggleSelection(cycleData) {
+                const c = cycleData.cycle;
+                if (this.tempSelectedCycles.includes(c)) {
+                    this.tempSelectedCycles = this.tempSelectedCycles.filter(x => x !== c);
+                } else {
+                    this.tempSelectedCycles.push(c);
+                }
+            },
+
+            closeModal() {
+                this.showModal = false;
+                this.currentModalProduct = '';
+                this.currentProductData = [];
+            },
+
+            confirmSelection() {
+                this.tempSelectedCycles.forEach(cycleStr => {
+                    const cycleData = this.currentProductData.find(x => x.cycle === cycleStr);
+                    const exists = this.trackedItems.some(t => t.product === this.currentModalProduct && t.cycle === cycleStr);
+                    
+                    if (!exists && cycleData) {
+                        this.trackedItems.push({
+                            id: `${this.currentModalProduct}-${cycleStr}`,
+                            product: this.currentModalProduct,
+                            cycle: cycleStr,
+                            eol: cycleData.eol,
+                            lts: cycleData.lts,
+                            latest: cycleData.latest
+                        });
+                    }
+                });
+                this.updateUrl();
+                this.closeModal();
+            },
+
+            removeItem(index) {
+                this.trackedItems.splice(index, 1);
+                this.updateUrl();
+            },
+
+            updateUrl() {
+                const param = this.trackedItems
+                    .map(item => `${item.product}:${item.cycle}`)
+                    .join(',');
+                const newUrl = new URL(window.location);
+                if (param) newUrl.searchParams.set('track', param);
+                else newUrl.searchParams.delete('track');
+                window.history.replaceState({}, '', newUrl);
+            },
+
+            async restoreFromUrl() {
+                const params = new URLSearchParams(window.location.search);
+                const trackParam = params.get('track');
+                if (!trackParam) return;
+
+                this.isLoading = true;
+                const pairs = trackParam.split(',').map(s => {
+                    const [p, c] = s.split(':');
+                    return { product: p, cycle: c };
+                });
+
+                const grouped = {};
+                pairs.forEach(pair => {
+                    if(!pair.product) return;
+                    if(!grouped[pair.product]) grouped[pair.product] = [];
+                    grouped[pair.product].push(pair.cycle);
+                });
+
+                const promises = Object.keys(grouped).map(async prod => {
+                    try {
+                        const res = await fetch(`https://endoflife.date/api/${prod}.json`);
+                        const allCycles = await res.json();
+                        grouped[prod].forEach(reqCycle => {
+                            const cycleData = allCycles.find(x => String(x.cycle) === String(reqCycle));
+                            if (cycleData) {
+                                this.trackedItems.push({
+                                    id: `${prod}-${reqCycle}`,
+                                    product: prod,
+                                    cycle: reqCycle,
+                                    eol: cycleData.eol,
+                                    lts: cycleData.lts,
+                                    latest: cycleData.latest
+                                });
+                            }
+                        });
+                    } catch (e) { console.error(`Err loading ${prod}`, e); }
+                });
+
+                await Promise.all(promises);
+                this.isLoading = false;
+            },
+
+            copyUrl() {
+                navigator.clipboard.writeText(window.location.href);
+                this.urlCopied = true;
+                setTimeout(() => this.urlCopied = false, 2000);
+            },
+
+            formatDate(d) {
+                if (d === false) return this.t('dateNever');
+                if (!d) return this.t('dateUnknown');
+                return d;
+            },
+
+            // Logica e Traduzione Stati
+            getStatusBadge(d) {
+                if (!d || d === false) return 'bg-green-100 text-green-700';
+                const days = this.getDaysDiff(d);
+                if (days < 0) return 'bg-red-100 text-red-700';
+                if (days < 180) return 'bg-yellow-100 text-yellow-700';
+                return 'bg-green-100 text-green-700';
+            },
+            
+            getBarColor(d) {
+                 if (!d || d === false) return 'bg-green-500';
+                 const days = this.getDaysDiff(d);
+                 if (days < 0) return 'bg-red-500';
+                 if (days < 180) return 'bg-yellow-500';
+                 return 'bg-green-500';
+            },
+
+            getStatusText(d) {
+                if (!d || d === false) return this.t('statusActive');
+                const days = this.getDaysDiff(d);
+                if (days < 0) return this.t('statusExpired');
+                if (days < 30) return this.t('statusLessMonth');
+                return Math.floor(days / 30) + ' ' + this.t('statusMonths');
+            },
+
+            getStatusTextClass(d) {
+                const days = this.getDaysDiff(d);
+                if (days < 0) return 'text-red-600 font-bold';
+                if (days < 180) return 'text-yellow-600 font-bold';
+                return 'text-green-600';
+            },
+
+            getDateColor(d) {
+                const days = this.getDaysDiff(d);
+                return days < 0 ? 'text-red-600' : 'text-slate-800';
+            },
+
+            getDaysDiff(dateString) {
+                if (!dateString) return 9999;
+                return Math.ceil((new Date(dateString) - new Date()) / (1000 * 60 * 60 * 24));
+            }
+        }
+    }).mount('#app');
+</script>
+
+</body>
+</html>
