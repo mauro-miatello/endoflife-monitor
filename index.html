@@ -256,7 +256,7 @@
     createApp({
         data() {
             return {
-                lang: 'en', // default, verrà sovrascritto in mounted
+                lang: 'en', 
                 translations: {
                     en: {
                         title: "EOL Version Tracker",
@@ -342,7 +342,6 @@
             }
         },
         async mounted() {
-            // 1. Rilevamento Lingua
             const userLang = navigator.language || navigator.userLanguage; 
             if (userLang && userLang.startsWith('it')) {
                 this.lang = 'it';
@@ -350,22 +349,17 @@
                 this.lang = 'en';
             }
 
-            // 2. Ripristino Vista
             const savedView = localStorage.getItem('eolViewMode');
             if (savedView) this.viewMode = savedView;
 
-            // 3. Fetch Lista Prodotti
             try {
                 const res = await fetch('https://endoflife.date/api/all.json');
                 this.allProductsList = await res.json();
             } catch (e) { console.error("Err fetch list", e); }
 
-            // 4. Ripristino URL
             await this.restoreFromUrl();
 
-            // 5. Contatore Visite (Opzionale)
             try {
-                // Sostituisci 'eol-monitor-app' con un ID unico se vuoi statistiche personali
                 const res = await fetch('https://api.countapi.xyz/hit/eol-monitor-app/visits');
                 const data = await res.json();
                 this.visitCount = data.value;
@@ -454,30 +448,47 @@
                 this.updateUrl();
             },
 
+            // --- NUOVA LOGICA URL PULITO ---
             updateUrl() {
-                const param = this.trackedItems
-                    .map(item => `${item.product}:${item.cycle}`)
-                    .join(',');
+                const params = new URLSearchParams();
+                
+                this.trackedItems.forEach(item => {
+                    // Usiamo _ come separatore sicuro tra prodotto e versione
+                    // Esempio: debian_11
+                    params.append('p', `${item.product}_${item.cycle}`);
+                });
+
                 const newUrl = new URL(window.location);
-                if (param) newUrl.searchParams.set('track', param);
-                else newUrl.searchParams.delete('track');
+                // Puliamo tutto e settiamo i nuovi parametri
+                newUrl.search = params.toString();
+                
                 window.history.replaceState({}, '', newUrl);
             },
 
             async restoreFromUrl() {
                 const params = new URLSearchParams(window.location.search);
-                const trackParam = params.get('track');
-                if (!trackParam) return;
+                // Recuperiamo tutti i valori 'p' (es. ['debian_11', 'ubuntu_20.04'])
+                const pValues = params.getAll('p');
+                
+                if (pValues.length === 0) return;
 
                 this.isLoading = true;
-                const pairs = trackParam.split(',').map(s => {
-                    const [p, c] = s.split(':');
-                    return { product: p, cycle: c };
-                });
+                
+                const pairs = pValues.map(val => {
+                    // Splittiamo solo al primo underscore per sicurezza
+                    // (anche se i nomi prodotto non dovrebbero averne)
+                    const separatorIndex = val.indexOf('_');
+                    if (separatorIndex === -1) return null;
+                    
+                    return { 
+                        product: val.substring(0, separatorIndex), 
+                        cycle: val.substring(separatorIndex + 1) 
+                    };
+                }).filter(x => x !== null);
 
+                // Raggruppa per minimizzare le chiamate API
                 const grouped = {};
                 pairs.forEach(pair => {
-                    if(!pair.product) return;
                     if(!grouped[pair.product]) grouped[pair.product] = [];
                     grouped[pair.product].push(pair.cycle);
                 });
@@ -487,6 +498,7 @@
                         const res = await fetch(`https://endoflife.date/api/${prod}.json`);
                         const allCycles = await res.json();
                         grouped[prod].forEach(reqCycle => {
+                            // Confronto stringhe per evitare problemi tra numeri e stringhe
                             const cycleData = allCycles.find(x => String(x.cycle) === String(reqCycle));
                             if (cycleData) {
                                 this.trackedItems.push({
@@ -505,6 +517,7 @@
                 await Promise.all(promises);
                 this.isLoading = false;
             },
+            // -------------------------------
 
             copyUrl() {
                 navigator.clipboard.writeText(window.location.href);
@@ -518,7 +531,6 @@
                 return d;
             },
 
-            // Logica e Traduzione Stati
             getStatusBadge(d) {
                 if (!d || d === false) return 'bg-green-100 text-green-700';
                 const days = this.getDaysDiff(d);
