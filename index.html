@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>EOL Monitor - Version Tracker</title>
+    <title>EOL Version Tracker</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -71,11 +71,11 @@
                 <div v-if="filteredProducts.length > 0" class="absolute w-full bg-white mt-1 rounded-lg shadow-xl max-h-60 overflow-y-auto border border-gray-100 divide-y divide-gray-100">
                     <div 
                         v-for="prod in filteredProducts" 
-                        :key="prod"
+                        :key="prod.name"
                         @click="openVersionSelector(prod)"
                         class="p-3 hover:bg-blue-50 cursor-pointer flex justify-between items-center transition"
                     >
-                        <span class="font-medium text-slate-700">{{ prod }}</span>
+                        <span class="font-medium text-slate-700">{{ prod.label }}</span>
                         <span class="text-xs text-slate-400">{{ t('selectVersions') }} <i class="fa-solid fa-chevron-right ml-1"></i></span>
                     </div>
                 </div>
@@ -99,7 +99,7 @@
                     <div class="p-4">
                         <div class="flex justify-between items-start mb-2">
                             <div>
-                                <h3 class="font-bold text-lg capitalize text-slate-800 leading-none">{{ item.product }}</h3>
+                                <h3 class="font-bold text-lg capitalize text-slate-800 leading-none">{{ getProductLabel(item.product) }}</h3>
                                 <span class="inline-block mt-1 bg-gray-100 text-gray-600 text-xs px-2 py-0.5 rounded border border-gray-300">
                                     v. {{ item.cycle }}
                                 </span>
@@ -150,7 +150,7 @@
                         <tbody class="divide-y divide-gray-100">
                             <tr v-for="(item, index) in trackedItems" :key="item.id" class="hover:bg-gray-50 transition">
                                 <td class="px-4 py-3 font-bold capitalize text-slate-700">
-                                    {{ item.product }}
+                                    {{ getProductLabel(item.product) }}
                                 </td>
                                 <td class="px-4 py-3">
                                     <span class="bg-gray-100 text-gray-700 px-2 py-1 rounded font-mono text-xs border border-gray-300">
@@ -195,7 +195,7 @@
         <div v-if="showModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 backdrop-blur-sm p-4">
             <div class="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[80vh] flex flex-col overflow-hidden">
                 <div class="p-4 bg-slate-50 border-b flex justify-between items-center">
-                    <h2 class="text-xl font-bold capitalize">{{ t('modalTitle').replace('{product}', currentModalProduct) }}</h2>
+                    <h2 class="text-xl font-bold capitalize">{{ t('modalTitle').replace('{product}', currentModalProductLabel) }}</h2>
                     <button @click="closeModal" class="text-gray-500 hover:text-gray-800">
                         <i class="fa-solid fa-times text-xl"></i>
                     </button>
@@ -256,7 +256,7 @@
     createApp({
         data() {
             return {
-                lang: 'en', 
+                lang: 'en',
                 translations: {
                     en: {
                         title: "EOL Version Tracker",
@@ -332,6 +332,7 @@
                 showModal: false,
                 modalLoading: false,
                 currentModalProduct: '',
+                currentModalProductLabel: '', // Nome visuale
                 currentProductData: [],
                 tempSelectedCycles: [],
 
@@ -352,9 +353,11 @@
             const savedView = localStorage.getItem('eolViewMode');
             if (savedView) this.viewMode = savedView;
 
+            // Fetch della lista prodotti aggiornata alla v1
             try {
-                const res = await fetch('https://endoflife.date/api/all.json');
-                this.allProductsList = await res.json();
+                const res = await fetch('https://endoflife.date/api/v1/products');
+                const data = await res.json();
+                this.allProductsList = data.result; // <-- CORREZIONE QUI
             } catch (e) { console.error("Err fetch list", e); }
 
             await this.restoreFromUrl();
@@ -369,6 +372,12 @@
             t(key) {
                 return this.translations[this.lang][key] || key;
             },
+            
+            // Nuovo helper per ottenere il label dal product ID
+            getProductLabel(productId) {
+                const found = this.allProductsList.find(p => p.name === productId);
+                return found ? found.label : productId;
+            },
 
             setViewMode(mode) {
                 this.viewMode = mode;
@@ -381,13 +390,21 @@
                     return;
                 }
                 const q = this.searchQuery.toLowerCase();
+                // Ricerca più intelligente: cerca in name, label e aliases
                 this.filteredProducts = this.allProductsList
-                    .filter(p => p.toLowerCase().includes(q))
+                    .filter(p => {
+                        const inName = p.name.toLowerCase().includes(q);
+                        const inLabel = p.label.toLowerCase().includes(q);
+                        const inAlias = p.aliases.some(a => a.toLowerCase().includes(q));
+                        return inName || inLabel || inAlias;
+                    })
                     .slice(0, 8);
             },
 
-            async openVersionSelector(product) {
-                this.currentModalProduct = product;
+            async openVersionSelector(productObj) {
+                this.currentModalProduct = productObj.name; // Usiamo lo slug (es. adonisjs) per le API
+                this.currentModalProductLabel = productObj.label; // Usiamo il label per il titolo (es. AdonisJS)
+                
                 this.showModal = true;
                 this.modalLoading = true;
                 this.tempSelectedCycles = [];
@@ -395,7 +412,7 @@
                 this.searchQuery = '';
 
                 try {
-                    const res = await fetch(`https://endoflife.date/api/${product}.json`);
+                    const res = await fetch(`https://endoflife.date/api/${productObj.name}.json`);
                     this.currentProductData = await res.json();
                 } catch (e) {
                     alert("API Error");
@@ -448,18 +465,14 @@
                 this.updateUrl();
             },
 
-            // --- NUOVA LOGICA URL PULITO ---
             updateUrl() {
                 const params = new URLSearchParams();
                 
                 this.trackedItems.forEach(item => {
-                    // Usiamo _ come separatore sicuro tra prodotto e versione
-                    // Esempio: debian_11
                     params.append('p', `${item.product}_${item.cycle}`);
                 });
 
                 const newUrl = new URL(window.location);
-                // Puliamo tutto e settiamo i nuovi parametri
                 newUrl.search = params.toString();
                 
                 window.history.replaceState({}, '', newUrl);
@@ -467,7 +480,6 @@
 
             async restoreFromUrl() {
                 const params = new URLSearchParams(window.location.search);
-                // Recuperiamo tutti i valori 'p' (es. ['debian_11', 'ubuntu_20.04'])
                 const pValues = params.getAll('p');
                 
                 if (pValues.length === 0) return;
@@ -475,8 +487,6 @@
                 this.isLoading = true;
                 
                 const pairs = pValues.map(val => {
-                    // Splittiamo solo al primo underscore per sicurezza
-                    // (anche se i nomi prodotto non dovrebbero averne)
                     const separatorIndex = val.indexOf('_');
                     if (separatorIndex === -1) return null;
                     
@@ -486,7 +496,6 @@
                     };
                 }).filter(x => x !== null);
 
-                // Raggruppa per minimizzare le chiamate API
                 const grouped = {};
                 pairs.forEach(pair => {
                     if(!grouped[pair.product]) grouped[pair.product] = [];
@@ -498,7 +507,6 @@
                         const res = await fetch(`https://endoflife.date/api/${prod}.json`);
                         const allCycles = await res.json();
                         grouped[prod].forEach(reqCycle => {
-                            // Confronto stringhe per evitare problemi tra numeri e stringhe
                             const cycleData = allCycles.find(x => String(x.cycle) === String(reqCycle));
                             if (cycleData) {
                                 this.trackedItems.push({
@@ -517,7 +525,6 @@
                 await Promise.all(promises);
                 this.isLoading = false;
             },
-            // -------------------------------
 
             copyUrl() {
                 navigator.clipboard.writeText(window.location.href);
