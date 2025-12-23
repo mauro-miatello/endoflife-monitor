@@ -1,0 +1,43 @@
+[v-cloak] {
+    display: none;
+}
+
+.modal-enter-active,
+.modal-leave-active {
+    transition: opacity 0.3s ease;
+}
+
+.modal-enter-from,
+.modal-leave-to {
+    opacity: 0;
+}
+
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #cbd5e1;
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-track {
+    background: #f1f5f9;
+}
+
+.sortable-ghost {
+    opacity: 0.4;
+    background: #ebf5ff !important;
+    border: 2px dashed #3b82f6 !important;
+}
+
+.sortable-drag {
+    opacity: 0.9;
+    cursor: grabbing !important;
+}
+
+.drag-handle {
+    cursor: move;
+    cursor: -webkit-grabbing;
+}
